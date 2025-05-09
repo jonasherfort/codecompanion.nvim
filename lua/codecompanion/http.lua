@@ -76,18 +76,51 @@ function Client:request(payload, actions, opts)
 
   adapter:get_env_vars()
 
-  local body = self.opts.encode(
-    vim.tbl_extend(
-      "keep",
-      handlers.form_parameters
-          and handlers.form_parameters(adapter, adapter:set_env_vars(adapter.parameters), payload.messages)
-        or {},
-      handlers.form_messages and handlers.form_messages(adapter, payload.messages) or {},
-      handlers.form_tools and handlers.form_tools(adapter, payload.tools) or {},
-      adapter.body and adapter.body or {},
-      handlers.set_body and handlers.set_body(adapter, payload) or {}
+  local body_components = {}
+
+  -- 1. Get formatted messages
+  if handlers.form_messages then
+    local formatted_msgs_component = handlers.form_messages(adapter, payload.messages)
+    if formatted_msgs_component then
+      vim.tbl_deep_extend("force", body_components, formatted_msgs_component)
+    end
+  end
+
+  -- 2. Get formatted tools
+  if handlers.form_tools then
+    local formatted_tools_component = handlers.form_tools(adapter, payload.tools) -- payload.tools is now the array of schemas
+    if formatted_tools_component then -- It will return nil if no tools or tools disabled
+      vim.tbl_deep_extend("force", body_components, formatted_tools_component)
+    end
+  end
+
+  -- 3. Get formatted parameters (and pass the actual tools component to it)
+  if handlers.form_parameters then
+    -- Check if body_components now has a 'tools' key after form_tools ran
+    local tools_being_sent = body_components.tools
+    local formatted_params_component = handlers.form_parameters(
+      adapter,
+      adapter:set_env_vars(adapter.parameters),
+      payload.messages,
+      tools_being_sent -- Pass the tools that will actually be in the body
     )
-  )
+    if formatted_params_component then
+      vim.tbl_deep_extend("force", body_components, formatted_params_component)
+    end
+  end
+
+  -- 4. Add other body components
+  if adapter.body then
+    vim.tbl_deep_extend("force", body_components, adapter.body)
+  end
+  if handlers.set_body then
+    local set_body_component = handlers.set_body(adapter, payload)
+    if set_body_component then
+      vim.tbl_deep_extend("force", body_components, set_body_component)
+    end
+  end
+
+  local body = self.opts.encode(body_components)
 
   local body_file = Path.new(vim.fn.tempname() .. ".json")
   body_file:write(vim.split(body, "\n"), "w")

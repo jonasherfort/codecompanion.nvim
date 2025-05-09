@@ -55,8 +55,14 @@ return {
     ---@param self CodeCompanion.Adapter
     ---@param params table
     ---@param messages table
+    ---@param selected_tool_schemas? table The array of tool schemas selected for the current request body
     ---@return table
-    form_parameters = function(self, params, messages)
+    form_parameters = function(self, params, messages, selected_tool_schemas)
+      if self.opts and self.opts.tools and selected_tool_schemas and not vim.tbl_isempty(selected_tool_schemas) then
+        params.tool_choice = "auto"
+      else
+        params.tool_choice = nil
+      end
       return params
     end,
 
@@ -104,24 +110,13 @@ return {
 
     ---Provides the schemas of the tools that are available to the LLM to call
     ---@param self CodeCompanion.Adapter
-    ---@param tools table<string, table>
+    ---@param tool_schemas table<table_tool_schema> An array of tool schema objects
     ---@return table|nil
-    form_tools = function(self, tools)
-      if not self.opts.tools or not tools then
-        return
+    form_tools = function(self, tool_schemas)
+      if not self.opts.tools or not tool_schemas or vim.tbl_isempty(tool_schemas) then
+        return nil
       end
-      if vim.tbl_count(tools) == 0 then
-        return
-      end
-
-      local transformed = {}
-      for _, tool in pairs(tools) do
-        for _, schema in pairs(tool) do
-          table.insert(transformed, schema)
-        end
-      end
-
-      return { tools = transformed }
+      return { tools = tool_schemas }
     end,
 
     ---Returns the number of tokens generated from the LLM

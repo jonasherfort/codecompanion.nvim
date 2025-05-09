@@ -817,14 +817,21 @@ function Chat:submit(opts)
 
   set_text_editing_area(self, 2) -- this accounts for the LLM header
 
+  local tool_schemas_for_payload = {}
+  if self.tools and self.tools.schemas and not vim.tbl_isempty(self.tools.schemas) then
+    for _, tool_schema_definition in pairs(self.tools.schemas) do
+      table.insert(tool_schemas_for_payload, tool_schema_definition)
+    end
+  end
+
   local payload = {
     messages = self.adapter:map_roles(vim.deepcopy(self.messages)),
-    tools = (not vim.tbl_isempty(self.tools.schemas) and { self.tools.schemas } or {}),
+    tools = tool_schemas_for_payload,
   }
 
   log:trace("Settings:\n%s", mapped_settings)
   log:trace("Messages:\n%s", self.messages)
-  log:trace("Tools:\n%s", payload.tools)
+  log:trace("Tools (payload):\n%s", payload.tools)
   log:info("Chat request started")
 
   local output = {}
