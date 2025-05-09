@@ -76,50 +76,71 @@ function Client:request(payload, actions, opts)
 
   adapter:get_env_vars()
 
-  local body_components = {}
+ local body_components = {} -- Start as an empty table (dictionary)
 
-  -- 1. Get formatted messages
+  -- 1. Get formatted messages (expected to return { messages = {...} } or similar)
   if handlers.form_messages then
     local formatted_msgs_component = handlers.form_messages(adapter, payload.messages)
-    if formatted_msgs_component then
-      vim.tbl_deep_extend("force", body_components, formatted_msgs_component)
+    if formatted_msgs_component and type(formatted_msgs_component) == "table" then
+      for k, v in pairs(formatted_msgs_component) do
+        body_components[k] = v
+      end
     end
   end
 
-  -- 2. Get formatted tools
+  -- 2. Get formatted tools (expected to return { tools = {...} } or nil)
   if handlers.form_tools then
-    local formatted_tools_component = handlers.form_tools(adapter, payload.tools) -- payload.tools is now the array of schemas
-    if formatted_tools_component then -- It will return nil if no tools or tools disabled
-      vim.tbl_deep_extend("force", body_components, formatted_tools_component)
+    local formatted_tools_component = handlers.form_tools(adapter, payload.tools)
+    if formatted_tools_component and type(formatted_tools_component) == "table" then
+      for k, v in pairs(formatted_tools_component) do
+        body_components[k] = v
+      end
     end
   end
 
-  -- 3. Get formatted parameters (and pass the actual tools component to it)
+  -- 3. Get formatted parameters (expected to return a flat table of parameters like { model="x", temperature=1, tool_choice="auto" })
   if handlers.form_parameters then
-    -- Check if body_components now has a 'tools' key after form_tools ran
-    local tools_being_sent = body_components.tools
-    local formatted_params_component = handlers.form_parameters(
+    local base_params = adapter:set_env_vars(adapter.parameters) or {} -- Ensure it's a table
+    local tools_actually_being_sent = body_components.tools -- This is the array of tool schemas, or nil
+
+    local final_params_component = handlers.form_parameters(
       adapter,
-      adapter:set_env_vars(adapter.parameters),
+      base_params, -- Pass the initial parameters
       payload.messages,
-      tools_being_sent -- Pass the tools that will actually be in the body
+      tools_actually_being_sent -- Pass the tools that will actually be in the body
     )
-    if formatted_params_component then
-      vim.tbl_deep_extend("force", body_components, formatted_params_component)
+    if final_params_component and type(final_params_component) == "table" then
+      for k, v in pairs(final_params_component) do
+        body_components[k] = v
+      end
     end
   end
 
-  -- 4. Add other body components
-  if adapter.body then
-    vim.tbl_deep_extend("force", body_components, adapter.body)
+  -- 4. Add other specific body components if they exist (e.g., adapter.body for custom top-level keys)
+  if adapter.body and type(adapter.body) == "table" then
+    for k, v in pairs(adapter.body) do
+      body_components[k] = v
+    end
   end
+
+  -- 5. Allow handlers.set_body to potentially override or add anything (use with caution)
   if handlers.set_body then
-    local set_body_component = handlers.set_body(adapter, payload)
-    if set_body_component then
-      vim.tbl_deep_extend("force", body_components, set_body_component)
-    end
+     local set_body_component = handlers.set_body(adapter, payload)
+     if set_body_component and type(set_body_component) == "table" then
+        for k, v in pairs(set_body_component) do
+          body_components[k] = v
+        end
+     end
   end
 
+  -- Ensure essential components are present if expected by the API
+  if not body_components.messages then
+    log:warn("Request body is missing 'messages' component. This might be an error.")
+    -- Depending on API strictness, you might need to ensure messages is always at least an empty array.
+    -- However, most APIs require messages.
+  end
+
+  log:trace("Final body_components before encoding: %s", body_components)
   local body = self.opts.encode(body_components)
 
   local body_file = Path.new(vim.fn.tempname() .. ".json")
